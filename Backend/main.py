@@ -8,29 +8,30 @@ from qdrant_client.http.models import Distance, VectorParams
 from qdrant_client.http.models import PointStruct, SearchRequest
 import google.generativeai as genai
 from contextlib import asynccontextmanager
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Load environment variables from .env file
 load_dotenv()
 
 # --- Configuration ---
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set.")
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY environment variable not set.")
 
 if not QDRANT_URL or not QDRANT_API_KEY:
     raise ValueError("QDRANT_URL and QDRANT_API_KEY environment variables must be set.")
 
 # Initialize Gemini and Qdrant
-genai.configure(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GOOGLE_API_KEY)
 llm_model = genai.GenerativeModel("gemini-1.5-flash")
 embedding_model = "models/gemini-embedding-001"
 
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 COLLECTION_NAME = "hospital-rag-data"
-VECTOR_SIZE = 768
+VECTOR_SIZE = 3072 
 
 # Pydantic model for the request body
 class QueryRequest(BaseModel):
@@ -73,7 +74,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-
+@retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5))
 async def get_embedding(text: str):
     """Generates an embedding for a given text using the Gemini API."""
     try:
@@ -141,20 +142,20 @@ async def process_query(req: QueryRequest):
         search_result = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=query_vector,
-            limit=3,  # Retrieve top 3 results
+            limit=6,  # Retrieve top 3 results
             with_payload=True
         )
 
         # Extract relevant context from the search results
         context = ""
         for hit in search_result:
-            # Check if payload has 'text_content' which is the key used in qdrant_loader
-            if hit.payload and 'text_content' in hit.payload:
-                context += f"Content: {hit.payload.get('text_content')}\n\n"
+            # Check if payload has 'text' which is the key used in qdrant_loader
+            if hit.payload and 'text' in hit.payload:
+                context += f"Content: {hit.payload.get('text')}\n\n"
             else:
                 context += f"Content: N/A\n\n"
         
-        if not context:
+        if not context or "N/A" in context:
             return {"answer": "I don't have enough information to answer that.", "sources": []}
 
         # Generate LLM response with the retrieved context
@@ -163,7 +164,7 @@ async def process_query(req: QueryRequest):
         return {
             "query": req.query,
             "answer": llm_response["answer"],
-            "sources": [{"text": hit.payload.get('text_content', 'N/A')} for hit in search_result]
+            "sources": [{"text": hit.payload.get('text', 'N/A')} for hit in search_result]
         }
     except Exception as e:
         print(f"An error occurred: {e}")
