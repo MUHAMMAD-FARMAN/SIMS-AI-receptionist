@@ -89,3 +89,4 @@ Dataset_preparation/SHL Departments data.xlsx
 Dataset_preparation/hospital_chunks.txt
 Backend/embeddings_cache.json
 temp.py
+frontend/src/config/config.js
