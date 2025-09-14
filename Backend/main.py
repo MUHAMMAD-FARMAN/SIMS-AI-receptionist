@@ -9,6 +9,7 @@ from qdrant_client.http.models import PointStruct, SearchRequest
 import google.generativeai as genai
 from contextlib import asynccontextmanager
 from tenacity import retry, stop_after_attempt, wait_exponential
+from fastapi.middleware.cors import CORSMiddleware
 
 # Load environment variables from .env file
 load_dotenv()
@@ -72,6 +73,15 @@ app = FastAPI(
     description="A FastAPI backend for a RAG system using Gemini and Qdrant.",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 @retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5))
