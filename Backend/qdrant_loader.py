@@ -1,269 +1,175 @@
+# File: qdrant_loader.py
+"""
+Ingestion script that creates a Qdrant collection (named dense + sparse vectors) and uploads
+both dense embeddings from Gemini and sparse embeddings from FastEmbed (SPLADE).
+
+Usage:
+  - Set environment variables in a .env file: GOOGLE_API_KEY, QDRANT_URL, QDRANT_API_KEY
+  - Prepare a newline-separated text file of document chunks (default: hospital_chunks.txt)
+  - Run: python qdrant_loader.py
+
+Requirements:
+  pip install qdrant-client fastembed google-generativeai tenacity python-dotenv tqdm
+
+Note: If your existing collection does not support named sparse vectors you must set
+RECREATE_COLLECTION = True to recreate it (this will DELETE existing data!).
+"""
+
 import os
-import re
 import time
 import json
-import numpy as np
-from typing import List, Dict
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
-from qdrant_client.models import (
-    VectorParams,
-    SparseVectorParams,
-    Distance,
-    PointStruct,
-    SparseVector,
-    PointVectors,
-)
-from sklearn.feature_extraction.text import TfidfVectorizer
-from tqdm import tqdm
+from typing import List
 from dotenv import load_dotenv
-import google.generativeai as genai 
+from tenacity import retry, wait_exponential, stop_after_attempt
+from qdrant_client import QdrantClient, models
+from qdrant_client.models import VectorParams, SparseVectorParams, Distance
+import google.generativeai as genai
 from fastembed import SparseTextEmbedding
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tqdm import tqdm
 
-# Load environment variables from .env file
+# --- CONFIG ---
 load_dotenv()
-
-# --- Configuration ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 
-# Check for required environment variables
-if not all([GOOGLE_API_KEY, QDRANT_URL, QDRANT_API_KEY]):
-    raise ValueError("Missing one or more required environment variables: GOOGLE_API_KEY, QDRANT_URL, QDRANT_API_KEY")
+INPUT_FILE = "hospital_chunks.txt"  # newline-separated chunks
+COLLECTION_NAME = "hospital-rag-data"
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
+VECTOR_SIZE = 3072  # Gemini embedding dim; verify
+BATCH_SIZE = 15
+RECREATE_COLLECTION = True  # set True ONCE if you need to recreate collection with sparse support
+SPARSE_MODEL_NAME = "prithivida/Splade_PP_en_v1"  # SPLADE++ model supported by FastEmbed
 
-# --- Initialize Clients ---
-# Initialize the Gemini embedding model configuration
+if not GOOGLE_API_KEY or not QDRANT_URL or not QDRANT_API_KEY:
+    raise SystemExit("Set GOOGLE_API_KEY, QDRANT_URL and QDRANT_API_KEY in .env")
+
+# Init
 genai.configure(api_key=GOOGLE_API_KEY)
+EMBEDDING_MODEL = "models/gemini-embedding-001"
+qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
-# Initialize the Qdrant client
-client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-    timeout=300
-)
+# FastEmbed sparse model (SPLADE)
+sparse_encoder = SparseTextEmbedding(model_name=SPARSE_MODEL_NAME)
 
-# --- Main Functions ---
-def get_text_chunks(file_path: str):
-    """
-    Reads a text file line by line and returns a list of chunks.
-    This assumes each line is a pre-formatted, semantically-rich chunk.
-    
-    Args:
-        file_path (str): The path to the input text file.
-        
-    Returns:
-        A list of text strings, or an empty list if the file is not found.
-    """
-    if not os.path.exists(file_path):
-        print(f"Error: The file '{file_path}' was not found.")
-        return []
-        
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            chunks = [line.strip() for line in f.readlines() if line.strip()]
-        return chunks
-    except Exception as e:
-        print(f"Error reading file '{file_path}': {e}")
-        return []
-
-def save_embeddings_locally(embeddings: list, file_path: str):
-    """Saves embeddings to a local JSON file."""
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(embeddings, f)
-        print(f"Embeddings successfully saved to '{file_path}'.")
-    except Exception as e:
-        print(f"Error saving embeddings to file: {e}")
-
-def load_embeddings_locally(file_path: str):
-    """Loads embeddings from a local JSON file."""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            embeddings = json.load(f)
-        print(f"Embeddings successfully loaded from '{file_path}'.")
-        return embeddings
-    except FileNotFoundError:
-        print(f"Local embeddings file '{file_path}' not found. Will generate new embeddings.")
-        return None
-    except Exception as e:
-        print(f"Error loading embeddings from file: {e}")
-        return None
-
+# retry wrapper for Gemini embedding
 @retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5))
-def create_embedding_with_retry(chunk):
-    """Generates a single embedding with retry logic."""
-    return genai.embed_content(
-        model="models/gemini-embedding-001",
-        content=chunk,
-        task_type="RETRIEVAL_DOCUMENT"
-    )['embedding']
+def create_dense_embedding(text: str) -> List[float]:
+    resp = genai.embed_content(model=EMBEDDING_MODEL, content=text, task_type="RETRIEVAL_DOCUMENT")
+    return resp["embedding"]
 
-def create_dense_embeddings(text_chunks: List[str], cache_file: str) -> List[List[float]]:
-    # (Your existing caching logic — simplified here)
-    embeddings = load_embeddings_locally(cache_file)
-    if embeddings is not None and len(embeddings) == len(text_chunks):
-        return embeddings
+def load_chunks(file_path: str) -> List[str]:
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Chunks file not found: {file_path}")
+    with open(file_path, "r", encoding="utf-8") as f:
+        # assume one chunk per line; normalize by stripping and lowercasing
+        chunks = [line.strip().lower() for line in f if line.strip()]
+    return chunks
 
-    embeddings = []
-    print(f"Generating dense embeddings for {len(text_chunks)} chunks...")
-    for i, chunk in enumerate(text_chunks):
-        try:
-            emb = create_embedding_with_retry(chunk)
-            embeddings.append(emb)
-            print(f" Dense embedding {i+1}/{len(text_chunks)}")
-        except Exception as e:
-            print(f"  Error embedding chunk {i}: {e}")
-            embeddings.append(None)  # keep positions aligned
-    # Save only successful embeddings if desired
-    save_embeddings_locally(embeddings, cache_file)
-    return embeddings
+def ensure_hybrid_collection(recreate: bool = False):
+    # if recreate=True -> delete and recreate (DANGEROUS: will erase data)
+    exists = False
+    try:
+        cols = qdrant_client.get_collections()
+        exists = COLLECTION_NAME in [c.name for c in cols.collections]
+    except Exception as e:
+        print("Warning: couldn't fetch collections list:", e)
 
-
-def create_sparse_vectors_tfidf(text_chunks: List[str]):
-    """
-    Build a TF-IDF model on all chunks and return a list of sparse vectors in Qdrant format:
-      [{"indices": [...], "values": [...]}, ...]
-    This is a simple and practical approach for sparse lexical signal.
-    """
-    print("Fitting TF-IDF to produce sparse vectors...")
-    vectorizer = TfidfVectorizer( norm='l2', dtype=np.float32)
-    X = vectorizer.fit_transform(text_chunks)  # scipy.sparse csr_matrix
-
-    sparse_vectors = []
-    for i in range(X.shape[0]):
-        row = X.getrow(i)
-        nz = row.nonzero()
-        indices = nz[1].tolist()
-        values = row.data.tolist()
-        sparse_vectors.append({"indices": indices, "values": values})
-    print("Sparse vectors created.")
-    return sparse_vectors
-
-
-def ensure_hybrid_collection(client: QdrantClient, collection_name: str, dense_dim: int,
-                             dense_name: str = "dense", sparse_name: str = "sparse",
-                             distance: Distance = Distance.COSINE):
-    """
-    Create or recreate a collection that supports named dense + sparse vectors.
-    If collection exists and has sparse config, this is a no-op.
-    """
-    if client.collection_exists(collection_name=collection_name):
-        info = client.get_collection(collection_name=collection_name)
-        # If sparse config already present, return
+    if exists and not recreate:
+        # Check if sparse config exists
+        info = qdrant_client.get_collection(collection_name=COLLECTION_NAME)
         cfg = getattr(info, "config", None)
+        sparse_present = False
         if cfg and getattr(cfg.params, "sparse_vectors", None):
-            print(f"Collection '{collection_name}' already supports sparse vectors.")
+            sparse_present = True
+        if sparse_present:
+            print("Collection exists and already supports sparse vectors. OK.")
             return
+        else:
+            raise SystemExit("Collection exists but doesn't support sparse vectors. Set RECREATE_COLLECTION=True to recreate it (data loss).")
 
-        # Otherwise recreate (drop & create) so new sparse config is included
-        print(f"Recreating collection '{collection_name}' with hybrid (dense + sparse) config...")
-        client.delete_collection(collection_name=collection_name)
+    if exists and recreate:
+        print("Deleting existing collection (recreate=True) ...")
+        qdrant_client.delete_collection(collection_name=COLLECTION_NAME)
 
-    print(f"Creating collection '{collection_name}' with dense_dim={dense_dim} ...")
-    client.create_collection(
-        collection_name=collection_name,
+    print("Creating collection with named dense + sparse vectors...")
+    qdrant_client.create_collection(
+        collection_name=COLLECTION_NAME,
         vectors_config={
-            dense_name: VectorParams(size=dense_dim, distance=distance)
+            DENSE_VECTOR_NAME: VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
         },
         sparse_vectors_config={
-            sparse_name: SparseVectorParams()
+            SPARSE_VECTOR_NAME: SparseVectorParams()
         }
     )
     print("Collection created.")
 
-def add_sparse_vectors_to_existing_collection(client: QdrantClient, collection_name: str,
-                                              sparse_vectors: List[Dict], ids: List[int],
-                                              sparse_name: str = "sparse", batch_size: int = 256):
+
+def embed_sparse_chunks(chunks: List[str]):
+    """Use FastEmbed SPLADE model to get sparse embeddings. Returns list of dicts {indices, values}.
+    The FastEmbed model returns SparseEmbedding objects with `indices` and `values`.
     """
-    If collection already exists with a sparse vector config, call update_vectors to add sparse vectors.
-    Uses models.PointVectors objects.
-    """
-    assert len(sparse_vectors) == len(ids)
-    total = len(ids)
-    for start in range(0, total, batch_size):
-        end = min(start + batch_size, total)
-        pts = []
-        for i in range(start, end):
-            sv = sparse_vectors[i]
-            pts.append(models.PointVectors(id=ids[i], vector={sparse_name: SparseVector(indices=sv["indices"], values=sv["values"])}))
-        client.update_vectors(collection_name=collection_name, points=pts)
-        print(f"Updated sparse vectors for ids {start}..{end-1}.")
+    print("Encoding sparse vectors with FastEmbed (SPLADE)...")
+    sparse_list = []
+    # FastEmbed's embed returns a generator; collecting into list
+    for sparse_emb in tqdm(list(sparse_encoder.embed(chunks)), desc="sparse embed"):
+        # sparse_emb has .indices and .values
+        sparse_list.append({"indices": list(map(int, sparse_emb.indices)), "values": [float(v) for v in sparse_emb.values]})
+    return sparse_list
 
 
-def upload_hybrid_to_qdrant(client: QdrantClient, collection_name: str, chunks: List[str],
-                            dense_embeddings: List[List[float]], sparse_vectors: List[Dict],
-                            batch_size: int = 64,
-                            dense_name: str = "dense", sparse_name: str = "sparse"):
-    """
-    Upload points with both named dense and sparse vectors.
-    Points are PointStructs where 'vector' can be a dict {dense_name: [...], sparse_name: SparseVector(...)}
-    """
+def upload_hybrid(chunks: List[str], dense_embeddings: List[List[float]], sparse_vectors: List[dict], batch_size: int = BATCH_SIZE):
     assert len(chunks) == len(dense_embeddings) == len(sparse_vectors)
-
     total = len(chunks)
+    print(f"Uploading {total} points in batches of {batch_size}...")
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
-        batch_points = []
+        batch = []
         for i in range(start, end):
-            emb = dense_embeddings[i]
+            dense = dense_embeddings[i]
             sp = sparse_vectors[i]
-            if emb is None:
-                # skip or handle failed dense embedding
-                continue
-            sv = SparseVector(indices=sp["indices"], values=sp["values"])
-            vec = {dense_name: emb, sparse_name: sv}
-            p = PointStruct(id=i, vector=vec, payload={"text": chunks[i]})
-            batch_points.append(p)
+            vec = {
+                DENSE_VECTOR_NAME: dense,
+                SPARSE_VECTOR_NAME: models.SparseVector(indices=sp["indices"], values=sp["values"])
+            }
+            p = models.PointStruct(id=i, vector=vec, payload={"text": chunks[i]})
+            batch.append(p)
+        qdrant_client.upsert(collection_name=COLLECTION_NAME, points=batch)
+        print(f"Uploaded batch {start}-{end-1}")
+        time.sleep(0.2)
 
-        if not batch_points:
-            continue
-
-        try:
-            client.upsert(collection_name=collection_name, points=batch_points)
-            print(f"Uploaded points {start}..{end-1} ({len(batch_points)} points).")
-            time.sleep(0.2)
-        except Exception as e:
-            print(f"Upload error for batch {start}-{end}: {e}")
-            raise
 
 if __name__ == "__main__":
-    # Define the file to read and the Qdrant collection name
-    input_file = "hospital_chunks.txt"
-    embedding_cache_file = "embeddings_cache.json"
-    qdrant_collection_name = "hospital-rag-data"
-    DENSE_VECTOR_NAME = "dense"
-    SPARSE_VECTOR_NAME = "sparse"
-    VECTOR_SIZE = 3072 # Gemini embedding dim; verify
-    BATCH_SIZE = 64
-    RECREATE_COLLECTION = False # set True ONCE if you need to recreate collection with sparse support
-    SPARSE_MODEL_NAME = "prithivida/Splade_PP_en_v1" # SPLADE++ model supported by FastEmbed
-   
-    print("Starting Qdrant ingestion process...")
-    
-    # Get the text chunks from the file
-    chunks = get_text_chunks(input_file)
+    chunks = load_chunks(INPUT_FILE)
     if not chunks:
-        print("No chunks to process. Exiting.")
-    else:
-         # 1) Create dense embeddings (Gemini)
-        dense_embeddings = create_dense_embeddings(chunks, embedding_cache_file)
+        print("No chunks found. Exiting.")
+        raise SystemExit(0)
 
-        # 2) Build sparse vectors (TF-IDF)
-        sparse_vectors = create_sparse_vectors_tfidf(chunks)
+    ensure_hybrid_collection(recreate=RECREATE_COLLECTION)
 
-        # 3) Create or ensure collection supports hybrid
-        # Use first embedding to get dim (fallback safe value)
-        first_emb = next((e for e in dense_embeddings if e), None)
-        if first_emb is None:
-            raise SystemExit("No dense embeddings produced.")
-        dense_dim = len(first_emb)
+    # Dense embeddings - use cache on disk to avoid reembedding
+    dense_cache = "embeddings_cache.json"
+    dense_embeddings = []
+    if os.path.exists(dense_cache):
+        with open(dense_cache, "r", encoding="utf-8") as f:
+            dense_embeddings = json.load(f)
+        if len(dense_embeddings) != len(chunks):
+            print("Dense cache length mismatch; regenerating dense embeddings.")
+            dense_embeddings = []
 
-        ensure_hybrid_collection(client, qdrant_collection_name, dense_dim=dense_dim)
+    if not dense_embeddings:
+        print("Generating dense embeddings (Gemini)... this may take a while.")
+        for c in tqdm(chunks, desc="dense embed"):
+            emb = create_dense_embedding(c)
+            dense_embeddings.append(emb)
+        with open(dense_cache, "w", encoding="utf-8") as f:
+            json.dump(dense_embeddings, f)
 
-        if dense_embeddings and sparse_vectors:
-            # Upload the data to Qdrant
-            upload_hybrid_to_qdrant(client,qdrant_collection_name, chunks, dense_embeddings, sparse_vectors)
-        else:
-            print("Failed to generate or load embeddings. Exiting.")
+    # Sparse embeddings via fastembed (SPLADE)
+    sparse_vectors = embed_sparse_chunks(chunks)
+
+    # Upload both
+    upload_hybrid(chunks, dense_embeddings, sparse_vectors)
+
+    print("Done uploading.")
