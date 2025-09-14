@@ -1,18 +1,9 @@
-# -----------------------------------------------------------------------------
-# File: main.py
+# main.py
 """
-FastAPI backend that performs hybrid search using Gemini dense embeddings and
-FastEmbed SPLADE sparse vectors already uploaded to Qdrant by qdrant_loader.py.
-
-Requirements:
-  pip install qdrant-client fastembed google-generativeai fastapi uvicorn
-
-Run:
-  uvicorn main:app --reload --port 8000
-
-Notes:
- - This code expects the collection to have named vectors: 'dense' and 'sparse'.
- - The sparse model is loaded at startup for query-time sparse encoding.
+FastAPI backend that uses Qdrant server-side BM25 + Gemini dense vectors.
+- Qdrant will compute BM25 sparse vectors (if collection was ingested with models.Document(..., model='Qdrant/bm25'))
+- The endpoint '/query' asks Qdrant to run a hybrid query via Query API (prefetch + FusionQuery)
+Fallback: if server-side hybrid throws (no inference support), we fall back to dense-only search.
 """
 
 import os
@@ -21,14 +12,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from qdrant_client import QdrantClient, models
-from qdrant_client.models import VectorParams, SparseVectorParams, Distance
 import google.generativeai as genai
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 from tenacity import retry, wait_exponential, stop_after_attempt
-from fastembed import SparseTextEmbedding
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
+
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
@@ -37,96 +26,124 @@ if not GOOGLE_API_KEY or not QDRANT_URL or not QDRANT_API_KEY:
     raise SystemExit("Set GOOGLE_API_KEY, QDRANT_URL and QDRANT_API_KEY in .env")
 
 # Config
-COLLECTION_NAME = "hospital-rag-data"
+COLLECTION_NAME = "hospital-rag-data-hybrid"  # must match ingestion
 DENSE_VECTOR_NAME = "dense"
-SPARSE_VECTOR_NAME = "sparse"
+SPARSE_VECTOR_NAME = "bm25"
 VECTOR_SIZE = 3072
-SPARSE_MODEL_NAME = "prithivida/Splade_PP_en_v1"
 EMBEDDING_MODEL = "models/gemini-embedding-001"
+LLM_MODEL = "gemini-1.5-flash"
 
-# Init clients and models
+# Init clients
 genai.configure(api_key=GOOGLE_API_KEY)
-qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+llm = genai.GenerativeModel(LLM_MODEL)
 
-# Load sparse encoder at startup
-sparse_encoder = SparseTextEmbedding(model_name=SPARSE_MODEL_NAME)
-
-# Simple LLM wrapper
-llm_model = genai.GenerativeModel("gemini-1.5-flash")
-
-# FastAPI app
-app = FastAPI(title="RAG Hybrid API")
+app = FastAPI(title="RAG API (Qdrant BM25 + Gemini)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
 
 class QueryRequest(BaseModel):
     query: str
 
-@retry(wait=wait_exponential(multiplier=1, min=4, max=10), stop=stop_after_attempt(5))
-async def get_embedding(text: str):
-    return await asyncio.to_thread(genai.embed_content, model=EMBEDDING_MODEL, content=text, task_type="RETRIEVAL_DOCUMENT")
 
-async def compute_sparse_query(text: str):
-    # fastembed returns generator, collect first result
-    sparse_gen = sparse_encoder.embed([text])
-    sparse_list = list(sparse_gen)
-    if not sparse_list:
-        return None
-    se = sparse_list[0]
-    return models.SparseVector(indices=list(map(int, se.indices)), values=[float(v) for v in se.values])
+@retry(wait=wait_exponential(multiplier=1, min=2, max=8), stop=stop_after_attempt(4))
+async def get_dense_embedding(text: str):
+    resp = await asyncio.to_thread(genai.embed_content, model=EMBEDDING_MODEL, content=text, task_type="RETRIEVAL_DOCUMENT")
+    return resp["embedding"]
 
-# Simple RRF fusion (same idea as before)
-RRF_K = 60
 
-def reciprocal_rank_fusion(lists_of_ids, k=RRF_K):
-    agg = {}
-    for id_list in lists_of_ids:
-        for rank, _id in enumerate(id_list):
-            score = 1.0 / (k + rank + 1)
-            agg[_id] = agg.get(_id, 0.0) + score
-    return [i for i, s in sorted(agg.items(), key=lambda kv: kv[1], reverse=True)]
+async def get_llm_answer(prompt: str):
+    try:
+        resp = await asyncio.to_thread(llm.generate_content, prompt, stream=False)
+        return resp.text if hasattr(resp, "text") else ""
+    except Exception as e:
+        print("LLM generation failed:", e)
+        return "I don't have enough information to answer that."
+
 
 @app.post("/query")
 async def query_endpoint(req: QueryRequest):
+    q = req.query.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Empty query")
+
     try:
-        q = req.query
-        dense_resp = await asyncio.to_thread(genai.embed_content, model=EMBEDDING_MODEL, content=q, task_type="RETRIEVAL_DOCUMENT")
-        query_vector = dense_resp["embedding"]
+        # 1) compute dense embedding locally (Gemini)
+        # lowercase the query text
+        q = q.lower()
+        query_dense = await get_dense_embedding(q)
 
-        # dense search
-        dense_hits = qdrant_client.search(collection_name=COLLECTION_NAME, query_vector=query_vector, limit=20, with_payload=True, vector_name=DENSE_VECTOR_NAME)
+        # 2) Build prefetch list:
+        #    - dense prefetch: use the dense vector and tell Qdrant to search the 'dense' named vector
+        #    - sparse prefetch: send a Document to Qdrant and let it compute BM25 sparse query on the server
+        prefetchs = [
+            models.Prefetch(
+                query=query_dense,
+                using=DENSE_VECTOR_NAME,
+                limit=50
+            ),
+            models.Prefetch(
+                query=models.Document(text=q, model="Qdrant/bm25"),
+                using=SPARSE_VECTOR_NAME,
+                limit=50
+            ),
+        ]
 
-        # sparse query
+        # 3) Ask Qdrant to fuse results server-side using RRF fusion
+        fusion_query = models.FusionQuery(fusion=models.Fusion.RRF)
+
         try:
-            sparse_vec = await asyncio.to_thread(compute_sparse_query, q)
-            named_sparse = models.NamedSparseVector(name=SPARSE_VECTOR_NAME, vector=sparse_vec)
-            sparse_hits = qdrant_client.search(collection_name=COLLECTION_NAME, query_vector=named_sparse, limit=50, with_payload=True)
+            # query_points will run the prefetches and fuse results on the server.
+            result = qdrant.query_points(
+                collection_name=COLLECTION_NAME,
+                prefetch=prefetchs,
+                query=fusion_query,
+                with_payload=True,
+                limit=6
+            )
+            points = result.points if hasattr(result, "points") else result
         except Exception as e:
-            print("Sparse query failed:", e)
-            sparse_hits = []
+            # If server-side hybrid is not supported by this Qdrant cluster, fallback to dense-only search
+            print("Server-side hybrid query failed (maybe cluster has no inference support):", e)
+            print("Falling back to dense-only Qdrant search.")
+            hits = qdrant.search(
+                collection_name=COLLECTION_NAME,
+                query_vector=query_dense,
+                limit=6,
+                with_payload=True,
+                vector_name=DENSE_VECTOR_NAME
+            )
+            points = hits
 
-        # fuse
-        dense_ids = [h.id for h in dense_hits]
-        sparse_ids = [h.id for h in sparse_hits]
-        fused = reciprocal_rank_fusion([dense_ids, sparse_ids])[:6]
+        # 4) Build context for LLM
+        context_parts = []
+        sources = []
+        for p in points:
+            payload_text = "N/A"
+            try:
+                if p.payload and "text" in p.payload:
+                    payload_text = p.payload.get("text")
+                else:
+                    payload_text = str(p.payload)
+            except Exception:
+                payload_text = "N/A"
+            context_parts.append(f"Content: {payload_text}")
+            sources.append({"id": p.id, "text": payload_text})
+        context = "\n\n".join(context_parts)
 
-        # build final hits preserving payloads
-        id_map = {h.id: h for h in dense_hits}
-        for h in sparse_hits:
-            if h.id not in id_map:
-                id_map[h.id] = h
-        final_hits = [id_map[i] for i in fused if i in id_map]
-
-        # build context
-        context = "\n\n".join([h.payload.get("text", str(h.payload)) for h in final_hits])
         if not context.strip():
-            return {"answer": "I don't have enough information to answer that.", "sources": []}
+            return {"query": q, "answer": "I don't have enough information to answer that.", "sources": []}
 
-        # call LLM
-        full_prompt = f"You are a helpful assistant. Use the following context to answer the question:\n\nContext: {context}\n\nQuestion: {q}\n\nAnswer:"
-        llm_out = await asyncio.to_thread(llm_model.generate_content, full_prompt, stream=False)
-        answer = llm_out.text if hasattr(llm_out, "text") else ""
+        # 5) Ask LLM (Gemini) to answer using the retrieved context
+        full_prompt = (
+            "You are a helpful assistant. Use the following context to answer the question. "
+            "If the answer is not in the context, say 'I don't have enough information to answer that.'\n\n"
+            f"Context:\n{context}\n\nQuestion: {q}\n\nAnswer:"
+        )
+        answer = await get_llm_answer(full_prompt)
 
-        return {"query": q, "answer": answer, "sources": [{"id": h.id, "text": h.payload.get("text", "")} for h in final_hits]}
+        # return {"query": q, "answer": answer, "sources": sources}
+        return {"answer": answer}
 
     except Exception as e:
         print("Error in /query:", e)
