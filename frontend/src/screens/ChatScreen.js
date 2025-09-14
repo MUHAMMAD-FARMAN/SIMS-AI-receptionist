@@ -30,30 +30,40 @@ const ChatScreen = () => {
 
   const sendQueryToBackend = async (userMessage) => {
     try {
+      console.log('Attempting to connect to:', `${BACKEND_URL}/query`);
+      
       const response = await fetch(`${BACKEND_URL}/query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message: userMessage,
+          query: userMessage,
         }),
       });
+
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('Received data:', data);
       return data.answer || 'Sorry, I couldn\'t process your request.';
     } catch (error) {
-      console.error('Error sending query to backend:', error);
+      console.error('Detailed error information:');
+      console.error('Error type:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Full error:', error);
+      
       Alert.alert(
         'Connection Error',
-        'Unable to connect to the server. Please check your connection and try again.',
+        `Unable to connect to the server: ${error.message}\n\nTrying to reach: ${BACKEND_URL}/query`,
         [{ text: 'OK' }]
       );
-      return 'Sorry, I\'m having trouble connecting to the server. Please try again later.';
+      return `Sorry, I'm having trouble connecting to the server: ${error.message}`;
     }
   };
 
