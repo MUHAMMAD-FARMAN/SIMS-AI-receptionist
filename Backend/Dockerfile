@@ -18,4 +18,4 @@ EXPOSE 8000
 
 # Run the Uvicorn server when the container starts
 # Use --host 0.0.0.0 to make the server accessible from outside the container
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
