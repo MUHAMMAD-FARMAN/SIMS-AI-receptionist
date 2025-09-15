@@ -1,19 +1,6 @@
 version: '3.8'
 
 services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: qdrant
-    restart: always
-    ports:
-      - "6333:6333" # REST API
-      - "6334:6334" # gRPC API
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      # Optional: set an API key for a simple layer of security
-      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY}
-
   fastapi_app:
     build: .
     container_name: fastapi_app
@@ -24,8 +11,6 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-    depends_on:
-      - qdrant
+    # Remove depends_on since we're using external Qdrant Cloud
 
-volumes:
-  qdrant_data:
+# Remove volumes section since we don't need local Qdrant storage
