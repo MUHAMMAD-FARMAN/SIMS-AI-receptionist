@@ -3,3 +3,5 @@ uvicorn[standard]
 google-generativeai
 qdrant-client
 python-dotenv
+tenacity
+pydantic
