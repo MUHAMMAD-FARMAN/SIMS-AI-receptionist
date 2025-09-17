@@ -102,6 +102,7 @@ async def query_endpoint(req: QueryRequest):
                 limit=6
             )
             points = result.points if hasattr(result, "points") else result
+            print("Using server-side hybrid Qdrant search.")
         except Exception as e:
             # If server-side hybrid is not supported by this Qdrant cluster, fallback to dense-only search
             print("Server-side hybrid query failed (maybe cluster has no inference support):", e)
