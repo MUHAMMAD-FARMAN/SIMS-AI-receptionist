@@ -2,13 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Animatable from 'react-native-animatable';
+import { colors, typography, spacing, borderRadius } from '../styles/theme';
 
 const { width, height } = Dimensions.get('window');
 
 const SplashScreen = () => {
   return (
     <LinearGradient
-      colors={['#6366f1', '#8b5cf6', '#a855f7']}
+      colors={colors.gradient.dark}
       style={styles.container}
     >
       <Animatable.View 
@@ -22,47 +23,40 @@ const SplashScreen = () => {
           iterationCount="infinite"
           style={styles.logoContainer}
         >
-          <Text style={styles.logo}>💬</Text>
+          <View style={styles.logoIcon}>
+            <Text style={styles.logo}>AI</Text>
+          </View>
         </Animatable.View>
         <Animatable.Text 
           animation="fadeIn"
           delay={500}
           style={styles.title}
         >
-          RAG Chat Assistant
+          SIMS AI Receptionist
         </Animatable.Text>
         <Animatable.Text 
           animation="fadeIn"
           delay={800}
           style={styles.subtitle}
         >
-          Intelligent Conversations Powered by AI
+          Intelligent Healthcare Assistant
         </Animatable.Text>
       </Animatable.View>
+      
       <Animatable.View 
         animation="fadeIn"
         delay={1200}
         style={styles.footer}
       >
-        <View style={styles.loadingDots}>
-          <Animatable.View 
-            animation="bounce" 
-            iterationCount="infinite"
-            delay={0}
-            style={[styles.dot, { backgroundColor: '#fff' }]} 
-          />
-          <Animatable.View 
-            animation="bounce" 
-            iterationCount="infinite"
-            delay={200}
-            style={[styles.dot, { backgroundColor: '#fff' }]} 
-          />
-          <Animatable.View 
-            animation="bounce" 
-            iterationCount="infinite"
-            delay={400}
-            style={[styles.dot, { backgroundColor: '#fff' }]} 
-          />
+        <View style={styles.loadingContainer}>
+          <View style={styles.loadingBar}>
+            <Animatable.View 
+              animation="pulse"
+              iterationCount="infinite"
+              style={styles.loadingProgress}
+            />
+          </View>
+          <Text style={styles.loadingText}>Initializing...</Text>
         </View>
       </Animatable.View>
     </LinearGradient>
@@ -77,43 +71,75 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
   },
   logoContainer: {
+    marginBottom: spacing.xl * 2,
+  },
+  logoIcon: {
     width: 120,
     height: 120,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: borderRadius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 30,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
   },
   logo: {
-    fontSize: 60,
+    fontSize: 48,
+    fontWeight: typography.weights.bold,
+    color: colors.text.primary,
+    letterSpacing: 2,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 10,
+    fontSize: typography.sizes.xxl,
+    fontWeight: typography.weights.bold,
+    color: colors.text.primary,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+    letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: typography.sizes.md,
+    color: colors.text.secondary,
     textAlign: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: spacing.xl,
+    lineHeight: 22,
   },
   footer: {
     position: 'absolute',
-    bottom: 60,
+    bottom: spacing.xl * 3,
+    alignItems: 'center',
   },
-  loadingDots: {
-    flexDirection: 'row',
-    gap: 8,
+  loadingContainer: {
+    alignItems: 'center',
   },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  loadingBar: {
+    width: 160,
+    height: 3,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.sm,
+    marginBottom: spacing.md,
+    overflow: 'hidden',
+  },
+  loadingProgress: {
+    width: '40%',
+    height: '100%',
+    backgroundColor: colors.text.secondary,
+    borderRadius: borderRadius.sm,
+  },
+  loadingText: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.secondary,
+    fontWeight: typography.weights.medium,
+    letterSpacing: 0.5,
   },
 });
 

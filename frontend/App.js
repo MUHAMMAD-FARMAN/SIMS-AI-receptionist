@@ -33,20 +33,13 @@ export default function App() {
         <Stack.Navigator
           initialRouteName="Home"
           screenOptions={{
-            headerStyle: {
-              backgroundColor: '#6366f1',
-            },
-            headerTintColor: '#fff',
-            headerTitleStyle: {
-              fontWeight: 'bold',
-            },
+            headerShown: false, // Disable all default headers
           }}
         >
           <Stack.Screen 
             name="Home" 
             component={HomeScreen}
             options={{ 
-              title: 'RAG Chat Assistant',
               headerShown: false 
             }}
           />
@@ -54,20 +47,14 @@ export default function App() {
             name="Chat" 
             component={ChatScreen}
             options={{ 
-              title: 'Chat Assistant',
-              headerStyle: {
-                backgroundColor: '#6366f1',
-              },
+              headerShown: false // No default header for Chat screen
             }}
           />
           <Stack.Screen 
             name="Settings" 
             component={SettingsScreen}
             options={{ 
-              title: 'Settings',
-              headerStyle: {
-                backgroundColor: '#6366f1',
-              },
+              headerShown: false // No default header for Settings screen
             }}
           />
         </Stack.Navigator>

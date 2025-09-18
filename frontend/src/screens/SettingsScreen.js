@@ -14,14 +14,15 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Animatable from 'react-native-animatable';
 import { useUser } from '../context/UserContext';
+import { colors, typography, spacing, borderRadius } from '../styles/theme';
 
 const avatarOptions = [
-  'https://ui-avatars.com/api/?name=User&background=6366f1&color=fff',
-  'https://ui-avatars.com/api/?name=User&background=ec4899&color=fff',
-  'https://ui-avatars.com/api/?name=User&background=10b981&color=fff',
-  'https://ui-avatars.com/api/?name=User&background=f59e0b&color=fff',
-  'https://ui-avatars.com/api/?name=User&background=ef4444&color=fff',
-  'https://ui-avatars.com/api/?name=User&background=8b5cf6&color=fff',
+  'https://ui-avatars.com/api/?name=User&background=1a1a1a&color=fff',
+  'https://ui-avatars.com/api/?name=User&background=374151&color=fff',
+  'https://ui-avatars.com/api/?name=User&background=6b7280&color=fff',
+  'https://ui-avatars.com/api/?name=User&background=9ca3af&color=000',
+  'https://ui-avatars.com/api/?name=User&background=d1d5db&color=000',
+  'https://ui-avatars.com/api/?name=User&background=f3f4f6&color=000',
 ];
 
 const SettingsScreen = ({ navigation }) => {
@@ -48,119 +49,140 @@ const SettingsScreen = ({ navigation }) => {
   };
 
   const updateAvatarWithName = (newName) => {
-    const baseUrl = selectedAvatar.split('?')[0];
-    const backgroundColor = selectedAvatar.match(/background=([^&]*)/)?.[1] || '6366f1';
-    const newAvatar = `${baseUrl}?name=${encodeURIComponent(newName || 'User')}&background=${backgroundColor}&color=fff`;
-    setSelectedAvatar(newAvatar);
+    setName(newName);
+    const encodedName = encodeURIComponent(newName || 'User');
+    const currentBg = selectedAvatar.split('background=')[1]?.split('&')[0] || '1a1a1a';
+    const currentColor = selectedAvatar.split('color=')[1] || 'fff';
+    setSelectedAvatar(`https://ui-avatars.com/api/?name=${encodedName}&background=${currentBg}&color=${currentColor}`);
   };
 
-  const selectAvatarColor = (avatar) => {
-    const backgroundColor = avatar.match(/background=([^&]*)/)?.[1] || '6366f1';
-    const baseUrl = avatar.split('?')[0];
-    const newAvatar = `${baseUrl}?name=${encodeURIComponent(name || 'User')}&background=${backgroundColor}&color=fff`;
-    setSelectedAvatar(newAvatar);
+  const selectAvatar = (avatar) => {
+    const encodedName = encodeURIComponent(name || 'User');
+    const bgColor = avatar.split('background=')[1]?.split('&')[0];
+    const textColor = avatar.split('color=')[1];
+    setSelectedAvatar(`https://ui-avatars.com/api/?name=${encodedName}&background=${bgColor}&color=${textColor}`);
   };
+
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <TouchableOpacity 
+        style={styles.backButton}
+        onPress={() => navigation.goBack()}
+      >
+        <Text style={styles.backButtonText}>◀</Text>
+      </TouchableOpacity>
+      <Text style={styles.headerTitle}>Settings</Text>
+      <View style={styles.headerRight} />
+    </View>
+  );
 
   return (
-    <LinearGradient
-      colors={['#f9fafb', '#f3f4f6']}
-      style={styles.container}
-    >
+    <LinearGradient colors={colors.gradient.dark} style={styles.container}>
+      {renderHeader()}
       <KeyboardAvoidingView 
+        style={styles.content}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
       >
         <ScrollView 
+          style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
           <Animatable.View 
             animation="fadeInUp" 
             duration={800}
-            style={styles.content}
+            style={styles.profileSection}
           >
-            {/* Current Avatar */}
-            <View style={styles.currentAvatarContainer}>
-              <Image 
-                source={{ uri: selectedAvatar }}
-                style={styles.currentAvatar}
-              />
-              <Text style={styles.currentAvatarLabel}>Current Avatar</Text>
+            <View style={styles.avatarContainer}>
+              <Image source={{ uri: selectedAvatar }} style={styles.currentAvatar} />
             </View>
+            <Text style={styles.profileTitle}>Profile Settings</Text>
+            <Text style={styles.profileSubtitle}>Customize your profile information</Text>
+          </Animatable.View>
 
-            {/* Name Input */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Display Name</Text>
+          <Animatable.View 
+            animation="fadeInUp" 
+            duration={800}
+            delay={200}
+            style={styles.formSection}
+          >
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Display Name</Text>
               <TextInput
-                style={styles.input}
+                style={styles.textInput}
                 value={name}
-                onChangeText={(text) => {
-                  setName(text);
-                  updateAvatarWithName(text);
-                }}
+                onChangeText={updateAvatarWithName}
                 placeholder="Enter your name"
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={colors.text.secondary}
+                autoCapitalize="words"
+                autoCorrect={false}
               />
             </View>
 
-            {/* Avatar Selection */}
-            <View style={styles.avatarSection}>
-              <Text style={styles.label}>Choose Avatar Color</Text>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Avatar Style</Text>
+              <Text style={styles.inputDescription}>Choose your profile picture style</Text>
               <View style={styles.avatarGrid}>
                 {avatarOptions.map((avatar, index) => {
-                  const backgroundColor = avatar.match(/background=([^&]*)/)?.[1];
-                  const currentBgColor = selectedAvatar.match(/background=([^&]*)/)?.[1];
-                  const isSelected = backgroundColor === currentBgColor;
+                  const encodedName = encodeURIComponent(name || 'User');
+                  const bgColor = avatar.split('background=')[1]?.split('&')[0];
+                  const textColor = avatar.split('color=')[1];
+                  const avatarUrl = `https://ui-avatars.com/api/?name=${encodedName}&background=${bgColor}&color=${textColor}`;
                   
                   return (
                     <TouchableOpacity
                       key={index}
                       style={[
                         styles.avatarOption,
-                        isSelected && styles.avatarOptionSelected
+                        selectedAvatar.includes(bgColor) && styles.selectedAvatar
                       ]}
-                      onPress={() => selectAvatarColor(avatar)}
+                      onPress={() => selectAvatar(avatar)}
                     >
-                      <Image 
-                        source={{ 
-                          uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'User')}&background=${backgroundColor}&color=fff`
-                        }}
-                        style={styles.avatarImage}
-                      />
-                      {isSelected && (
-                        <View style={styles.checkmark}>
-                          <Text style={styles.checkmarkText}>✓</Text>
-                        </View>
-                      )}
+                      <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
                     </TouchableOpacity>
                   );
                 })}
               </View>
             </View>
+          </Animatable.View>
 
-            {/* Save Button */}
-            <TouchableOpacity
-              style={styles.saveButton}
-              onPress={handleSave}
-              activeOpacity={0.8}
-            >
-              <LinearGradient
-                colors={['#6366f1', '#8b5cf6']}
-                style={styles.saveButtonGradient}
-              >
-                <Text style={styles.saveButtonText}>Save Changes</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {/* Cancel Button */}
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
+          <Animatable.View 
+            animation="fadeInUp" 
+            duration={800}
+            delay={400}
+            style={styles.infoSection}
+          >
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>About SIMS AI</Text>
+              <Text style={styles.infoText}>
+                Your intelligent healthcare assistant powered by advanced AI technology. 
+                Get instant answers to medical questions and healthcare guidance.
+              </Text>
+            </View>
+            
+            <View style={styles.infoCard}>
+              <Text style={styles.infoTitle}>Privacy & Security</Text>
+              <Text style={styles.infoText}>
+                Your conversations are processed securely. We prioritize your privacy 
+                and never store personal medical information.
+              </Text>
+            </View>
           </Animatable.View>
         </ScrollView>
+
+        <Animatable.View 
+          animation="fadeInUp" 
+          duration={800}
+          delay={600}
+          style={styles.footer}
+        >
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+            <View style={styles.saveButtonContent}>
+              <Text style={styles.saveButtonText}>Save Changes</Text>
+              <Text style={styles.saveButtonIcon}>✓</Text>
+            </View>
+          </TouchableOpacity>
+        </Animatable.View>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -170,49 +192,108 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingVertical: 20,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backButtonText: {
+    fontSize: 20,
+    color: colors.text.primary,
+    fontWeight: typography.weights.bold,
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: typography.sizes.lg,
+    color: colors.text.primary,
+    fontWeight: typography.weights.bold,
+    textAlign: 'center',
+  },
+  headerRight: {
+    width: 40,
   },
   content: {
-    paddingHorizontal: 20,
+    flex: 1,
   },
-  currentAvatarContainer: {
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  profileSection: {
     alignItems: 'center',
-    marginBottom: 30,
+    paddingVertical: spacing.xl,
+  },
+  avatarContainer: {
+    marginBottom: spacing.lg,
   },
   currentAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    marginBottom: 10,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     borderWidth: 3,
-    borderColor: '#6366f1',
+    borderColor: colors.surface,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  currentAvatarLabel: {
-    fontSize: 14,
-    color: '#6b7280',
+  profileTitle: {
+    fontSize: typography.sizes.xl,
+    color: colors.text.primary,
+    fontWeight: typography.weights.bold,
+    marginBottom: spacing.xs,
   },
-  inputContainer: {
-    marginBottom: 30,
+  profileSubtitle: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.secondary,
+    textAlign: 'center',
   },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 10,
+  formSection: {
+    marginBottom: spacing.xl,
   },
-  input: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 15,
-    fontSize: 16,
+  inputGroup: {
+    marginBottom: spacing.lg,
+  },
+  inputLabel: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.primary,
+    fontWeight: typography.weights.semibold,
+    marginBottom: spacing.xs,
+    letterSpacing: 0.5,
+  },
+  inputDescription: {
+    fontSize: typography.sizes.xs,
+    color: colors.text.secondary,
+    marginBottom: spacing.md,
+  },
+  textInput: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    color: '#111827',
-  },
-  avatarSection: {
-    marginBottom: 30,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: typography.sizes.sm,
+    color: colors.text.primary,
+    fontWeight: typography.weights.medium,
   },
   avatarGrid: {
     flexDirection: 'row',
@@ -222,54 +303,78 @@ const styles = StyleSheet.create({
   avatarOption: {
     width: '30%',
     aspectRatio: 1,
-    marginBottom: 15,
-    borderRadius: 12,
-    overflow: 'hidden',
+    borderRadius: borderRadius.md,
     borderWidth: 2,
     borderColor: 'transparent',
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
   },
-  avatarOptionSelected: {
-    borderColor: '#6366f1',
+  selectedAvatar: {
+    borderColor: colors.text.secondary,
   },
   avatarImage: {
     width: '100%',
     height: '100%',
   },
-  checkmark: {
-    position: 'absolute',
-    bottom: 5,
-    right: 5,
-    backgroundColor: '#6366f1',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
+  infoSection: {
+    marginBottom: spacing.xl,
   },
-  checkmarkText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  infoCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  infoTitle: {
+    fontSize: typography.sizes.sm,
+    color: colors.text.primary,
+    fontWeight: typography.weights.semibold,
+    marginBottom: spacing.xs,
+  },
+  infoText: {
+    fontSize: typography.sizes.xs,
+    color: colors.text.secondary,
+    lineHeight: 18,
+  },
+  footer: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.lg,
   },
   saveButton: {
-    marginBottom: 15,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  saveButtonGradient: {
-    paddingVertical: 15,
-    borderRadius: 12,
+  saveButtonContent: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
   saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: typography.sizes.md,
+    color: colors.text.primary,
+    fontWeight: typography.weights.semibold,
+    marginRight: spacing.sm,
   },
-  cancelButton: {
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#6b7280',
-    fontSize: 16,
+  saveButtonIcon: {
+    fontSize: 18,
+    color: colors.text.secondary,
+    fontWeight: typography.weights.bold,
   },
 });
 
