@@ -90,6 +90,3 @@ Dataset_preparation/SHL Departments data.xlsx
 Dataset_preparation/hospital_chunks.txt
 Backend/embeddings_cache.json
 Backend/temp.py
-
-# Config files (we'll create production versions)
-# frontend/src/config/config.js  ← Comment this out so we can include it

@@ -6,10 +6,13 @@ import uuid from 'react-native-uuid';
 import { useUser } from '../context/UserContext';
 import { BACKEND_URL } from '../config/config';
 import { colors, typography, spacing, borderRadius } from '../styles/theme';
+import NetInfo from '@react-native-community/netinfo';
 
 const ChatScreen = ({ navigation }) => {
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
+  const [debugInfo, setDebugInfo] = useState('Ready');
+  const [networkInfo, setNetworkInfo] = useState('Checking...');
   const { user } = useUser();
 
   useEffect(() => {
@@ -27,13 +30,23 @@ const ChatScreen = ({ navigation }) => {
         system: false,
       },
     ]);
+
+    // Check network status for APK debugging
+    NetInfo.fetch().then(state => {
+      setNetworkInfo(`${state.type} - ${state.isConnected ? 'Connected' : 'Disconnected'}`);
+      console.log('Network Info:', state);
+    });
   }, []);
 
   const sendQueryToBackend = async (userMessage) => {
     try {
-      console.log('Attempting to connect to:', `${BACKEND_URL}/query`);
+      const url = `${BACKEND_URL}/query`;
+      setDebugInfo(`Connecting to: ${url}`);
+      console.log('Attempting to connect to:', url);
+      console.log('Platform:', Platform.OS);
+      console.log('Network:', networkInfo);
       
-      const response = await fetch(`${BACKEND_URL}/query`, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,8 +54,10 @@ const ChatScreen = ({ navigation }) => {
         body: JSON.stringify({
           query: userMessage,
         }),
+        timeout: 15000, // Increased timeout for APK
       });
 
+      setDebugInfo(`Response: ${response.status} ${response.ok ? 'OK' : 'Error'}`);
       console.log('Response status:', response.status);
       console.log('Response ok:', response.ok);
 
@@ -52,13 +67,19 @@ const ChatScreen = ({ navigation }) => {
 
       const data = await response.json();
       console.log('Response data:', data);
+      setDebugInfo('Connected successfully');
       
       return data.answer || 'I apologize, but I couldn\'t process your request at the moment.';
     } catch (error) {
+      const errorMsg = error.message || 'Unknown error';
+      setDebugInfo(`Error: ${errorMsg}`);
       console.error('Backend connection error:', error);
+      
+      // Enhanced error message for APK debugging
+      const platformInfo = Platform.OS === 'android' ? 'Android APK' : Platform.OS;
       Alert.alert(
         'Connection Error',
-        'Unable to connect to the AI assistant. Please check your internet connection and try again.',
+        `Network error: Cannot reach the server. Check if the backend is running.\n\nPlatform: ${platformInfo}\nNetwork: ${networkInfo}\nTrying to connect to: ${BACKEND_URL}\nError: ${errorMsg}`,
         [{ text: 'OK' }]
       );
       return 'I\'m sorry, I\'m having trouble connecting right now. Please try again in a moment.';
@@ -160,6 +181,30 @@ const ChatScreen = ({ navigation }) => {
     );
   };
 
+  const testConnection = async () => {
+    setDebugInfo('Testing connection...');
+    try {
+      // Test basic network connectivity first
+      const testResponse = await fetch('https://httpbin.org/get', {
+        method: 'GET',
+        timeout: 5000,
+      });
+      console.log('HTTPS test:', testResponse.status);
+      
+      // Then test our backend
+      const response = await fetch(`${BACKEND_URL}/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'test' }),
+        timeout: 10000,
+      });
+      setDebugInfo(`Test: ${response.status} ${response.ok ? 'OK' : 'Failed'}`);
+    } catch (error) {
+      setDebugInfo(`Test failed: ${error.message}`);
+      console.log('Connection test error:', error);
+    }
+  };
+
   const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity 
@@ -170,9 +215,12 @@ const ChatScreen = ({ navigation }) => {
       </TouchableOpacity>
       <View style={styles.headerTitle}>
         <Text style={styles.headerTitleText}>AI Assistant</Text>
-        <Text style={styles.headerSubtitle}>Healthcare Support</Text>
+        <Text style={styles.headerSubtitle}>{debugInfo} | {networkInfo}</Text>
       </View>
       <View style={styles.headerRight}>
+        <TouchableOpacity onPress={testConnection} style={styles.testButton}>
+          <Text style={styles.testButtonText}>Test</Text>
+        </TouchableOpacity>
         <View style={styles.statusIndicator} />
       </View>
     </View>
@@ -254,6 +302,21 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     alignItems: 'center',
+    flexDirection: 'row',
+  },
+  testButton: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  testButtonText: {
+    color: colors.text.primary,
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   statusIndicator: {
     width: 8,
