@@ -35,6 +35,9 @@ const ChatScreen = ({ navigation }) => {
     NetInfo.fetch().then(state => {
       setNetworkInfo(`${state.type} - ${state.isConnected ? 'Connected' : 'Disconnected'}`);
       console.log('Network Info:', state);
+    }).catch(error => {
+      setNetworkInfo('Network info unavailable');
+      console.log('NetInfo error:', error);
     });
   }, []);
 

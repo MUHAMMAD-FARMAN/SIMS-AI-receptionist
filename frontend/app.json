@@ -22,7 +22,27 @@
       },
       "edgeToEdgeEnabled": true,
       "usesCleartextTraffic": true,
-      "package": "com.muhammadfarman.RagChatApp"
+      "package": "com.muhammadfarman.RagChatApp",
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE"
+      ],
+      "networkSecurityConfig": {
+        "cleartextTrafficPermitted": true,
+        "content": {
+          "domain-config": [
+            {
+              "domains": ["167.71.234.204"],
+              "cleartextTrafficPermitted": true
+            },
+            {
+              "domains": ["httpbin.org"],
+              "cleartextTrafficPermitted": true
+            }
+          ]
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
