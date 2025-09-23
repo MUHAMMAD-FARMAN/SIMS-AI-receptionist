@@ -22,31 +22,22 @@
       },
       "edgeToEdgeEnabled": true,
       "usesCleartextTraffic": true,
-      "package": "com.muhammadfarman.RagChatApp",
-      "permissions": [
-        "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "ACCESS_WIFI_STATE"
-      ],
-      "networkSecurityConfig": {
-        "cleartextTrafficPermitted": true,
-        "content": {
-          "domain-config": [
-            {
-              "domains": ["167.71.234.204"],
-              "cleartextTrafficPermitted": true
-            },
-            {
-              "domains": ["httpbin.org"],
-              "cleartextTrafficPermitted": true
-            }
-          ]
-        }
-      }
+      "networkSecurityConfig": "res/xml/network_security_config.xml",
+      "package": "com.muhammadfarman.RagChatApp"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "f2a0a462-91d3-4a8f-8cea-5fab8d27a330"
