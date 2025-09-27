@@ -31,7 +31,7 @@ DENSE_VECTOR_NAME = "dense"
 SPARSE_VECTOR_NAME = "bm25"
 VECTOR_SIZE = 3072
 EMBEDDING_MODEL = "models/gemini-embedding-001"
-LLM_MODEL = "gemini-1.5-flash"
+LLM_MODEL = "gemini-flash-latest"
 
 # Init clients
 genai.configure(api_key=GOOGLE_API_KEY)
